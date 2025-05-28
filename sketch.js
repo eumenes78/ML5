@@ -17,6 +17,8 @@ let mouthWasOpen = false;
 let mouthOpenStart = 0;
 let currentLetter = null;
 let mouthOpenThreshold = 15; // Distance threshold for mouth being "open"
+let lastLetterSpawn = 0;
+let letterSpawnInterval = 100; // Spawn a new letter every 100ms when mouth is open
 
 function preload() {
   // Load the faceMesh model
@@ -54,38 +56,41 @@ function draw() {
       
       if (mouthOpen) {
         if (!mouthWasOpen) {
-          // Mouth just opened, start timer and spawn a new letter
+          // Mouth just opened, start timer and spawn first letter
           mouthOpenStart = millis();
-          let letter = String.fromCharCode(65 + floor(random(26))); // Random A-Z
-          currentLetter = {
-            char: letter,
-            x: (upperLip.x + lowerLip.x) / 2,
-            y: (upperLip.y + lowerLip.y) / 2,
-            size: 24,
-            vx: random(-2, 2), // horizontal velocity
-            vy: random(1, 3),  // vertical velocity
-            startTime: mouthOpenStart,
-            opacity: 255
-          };
-          letters.push(currentLetter);
-        } else if (currentLetter) {
-          // Grow the current letter the longer mouth stays open
-          let openDuration = millis() - mouthOpenStart;
-          currentLetter.size = 24 + openDuration * 0.1; // Grow faster
-          // Update position to follow mouth
-          currentLetter.x = (upperLip.x + lowerLip.x) / 2;
-          currentLetter.y = (upperLip.y + lowerLip.y) / 2;
+          lastLetterSpawn = millis();
+          spawnLetter(upperLip, lowerLip);
+        } else {
+          // Continuously spawn letters while mouth is open
+          if (millis() - lastLetterSpawn > letterSpawnInterval) {
+            spawnLetter(upperLip, lowerLip);
+            lastLetterSpawn = millis();
+          }
+          
+          // Grow all letters that are still attached to mouth
+          for (let letter of letters) {
+            if (letter.attachedToMouth) {
+              let openDuration = millis() - mouthOpenStart; // Use mouth open start time, not individual letter time
+              letter.size = 24 + openDuration * 0.05;
+              // Update position to follow mouth
+              letter.x = (upperLip.x + lowerLip.x) / 2 + random(-5, 5);
+              letter.y = (upperLip.y + lowerLip.y) / 2 + random(-5, 5);
+            }
+          }
         }
         mouthWasOpen = true;
       } else {
-        // Mouth closed, stop growing current letter and let it fall
-        if (mouthWasOpen && currentLetter) {
-          // Give the letter some initial velocity when mouth closes
-          currentLetter.vy = random(2, 5);
-          currentLetter.vx = random(-3, 3);
+        // Mouth closed, release all attached letters
+        if (mouthWasOpen) {
+          for (let letter of letters) {
+            if (letter.attachedToMouth) {
+              letter.attachedToMouth = false;
+              letter.vy = random(2, 5);
+              letter.vx = random(-4, 4);
+            }
+          }
         }
         mouthWasOpen = false;
-        currentLetter = null;
       }
     }
   }
@@ -94,17 +99,44 @@ function draw() {
   for (let i = letters.length - 1; i >= 0; i--) {
     let letter = letters[i];
     
-    // Update position
-    letter.x += letter.vx;
-    letter.y += letter.vy;
-    letter.vy += 0.2; // gravity
+    // Update position only if not attached to mouth
+    if (!letter.attachedToMouth) {
+      letter.x += letter.vx;
+      letter.y += letter.vy;
+      letter.vy += 0.2; // gravity
+      
+      // Check if letter hits the bottom of the screen
+      if (letter.y >= height - letter.size/2) {
+        letter.y = height - letter.size/2; // Keep it at the bottom
+        letter.vy = 0; // Stop vertical movement
+        letter.vx *= 0.8; // Add friction to horizontal movement
+        letter.settled = true; // Mark as settled at bottom
+        
+        // Stop horizontal movement when it's very slow
+        if (abs(letter.vx) < 0.1) {
+          letter.vx = 0;
+        }
+      }
+      
+      // Keep letters within screen bounds horizontally
+      if (letter.x < letter.size/2) {
+        letter.x = letter.size/2;
+        letter.vx *= -0.5; // Bounce back with reduced speed
+      }
+      if (letter.x > width - letter.size/2) {
+        letter.x = width - letter.size/2;
+        letter.vx *= -0.5; // Bounce back with reduced speed
+      }
+    }
     
-    // Fade out over time
-    letter.opacity -= 1;
+    // Only fade opacity if letter hasn't settled at the bottom
+    if (!letter.settled && !letter.attachedToMouth) {
+      letter.opacity -= 1; // Gradual fade for letters still falling
+    }
     
     // Draw the letter
     push();
-    fill(255, 100, 100, letter.opacity);
+    fill(letter.r, letter.g, letter.b, letter.opacity);
     stroke(255, 255, 255, letter.opacity);
     strokeWeight(2);
     textAlign(CENTER, CENTER);
@@ -113,8 +145,8 @@ function draw() {
     text(letter.char, letter.x, letter.y);
     pop();
     
-    // Remove letters that are off screen or too faded
-    if (letter.y > height + 100 || letter.opacity <= 0) {
+    // Only remove letters that fade out completely (don't remove based on position)
+    if (letter.opacity <= 0) {
       letters.splice(i, 1);
     }
   }
@@ -137,4 +169,24 @@ function draw() {
 function gotFaces(results) {
   // Save the output to the faces variable
   faces = results;
+}
+
+function spawnLetter(upperLip, lowerLip) {
+  let letter = String.fromCharCode(65 + floor(random(26))); // Random A-Z
+  let newLetter = {
+    char: letter,
+    x: (upperLip.x + lowerLip.x) / 2,
+    y: (upperLip.y + lowerLip.y) / 2,
+    size: 24,
+    vx: random(-1, 1), // horizontal velocity
+    vy: random(-1, 1), // vertical velocity
+    startTime: millis(),
+    opacity: 255,
+    attachedToMouth: true,
+    settled: false, // Track if letter has settled at bottom
+    r: random(100, 255), // Random red component
+    g: random(100, 255), // Random green component
+    b: random(100, 255)  // Random blue component
+  };
+  letters.push(newLetter);
 }
